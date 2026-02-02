@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2023-06-09T07-32-12Z
+    container_name: flowchat-infra-test-minio-1
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # API
+      - "9001:9001" # Console
+    volumes:
+      - flowchat-infra-test-minio-data:/data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine3.22
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  mongo:
+    image: mongo:7
+    container_name: mongodb-rs0
+    restart: unless-stopped
+    ports:
+      - "27017:27017"   # میزبان 27017 → کانتینر 27017
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+
+    volumes:
+      - dev_mongo_data:/data/db
+      - ./mongo-keyfile:/etc/secrets/mongo-keyfile:ro
+
+    command: >
+      mongod --replSet rs0 --keyFile /etc/secrets/mongo-keyfile --bind_ip_all
+
+    healthcheck:
+      test: >
+        mongosh -u root -p password --authenticationDatabase admin --quiet --eval "
+        try {
+          rs.status().ok
+        } catch (e) {
+          rs.initiate({
+            _id: 'rs0',
+            members: [{ _id: 0, host: 'localhost:27017' }]
+          });
+        }"
+      interval: 10s
+      timeout: 10s
+      start_period: 40s
+      retries: 10
+
+volumes:
+  flowchat-infra-test-minio-data:
+    external: true
+  dev_mongo_data:
+    external: true
+  redis_data:
+    driver: local
+
+networks:
+  flowchat-n-test:
+    external: true
